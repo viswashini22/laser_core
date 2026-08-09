@@ -2,17 +2,23 @@
   "name": "laservoice-ai",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=20.0.0 <23.0.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start", "backend": "uvicorn backend.main:app --host 0.0.0.0 --port 8000", "docker:build": "docker build -t laservoice-ai .", "docker:run": "docker compose up --build"
+    "start": "next start",
+    "backend": "uvicorn backend.main:app --host 0.0.0.0 --port 8000",
+    "docker:build": "docker build -t laservoice-ai .",
+    "docker:run": "docker compose up --build"
   },
   "dependencies": {
     "framer-motion": "^11.11.9",
     "lucide-react": "^0.468.0",
-    "next": "15.3.3",
-    "react": "19.1.0",
-    "react-dom": "19.1.0",
+    "next": "^15.1.7",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "recharts": "^2.15.0"
   },
   "devDependencies": {
