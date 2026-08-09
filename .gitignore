@@ -6,3 +6,9 @@ __pycache__/
 *.pyd
 *.log
 .DS_Store
+.venv/
+.venv-1/
+.pytest_cache/
+LaserDataset/
+*.db
+*.sqlite

@@ -231,8 +231,8 @@ export function BleOscilloscopeDashboard() {
   const [deviceName, setDeviceName] = useState('No device connected');
   const [status, setStatus] = useState('Ready to connect');
   const [isSupported, setIsSupported] = useState(false);
-  const [connectionMode, setConnectionMode] = useState<'bluetooth' | 'wifi'>('bluetooth');
-  const [wifiIp, setWifiIp] = useState('192.168.1.105');
+  const [connectionMode, setConnectionMode] = useState<'bluetooth' | 'wifi'>('wifi');
+  const [wifiIp, setWifiIp] = useState('192.168.1.8');
   const [wifiPort, setWifiPort] = useState('8000');
   const [wifiStatus, setWifiStatus] = useState('Disconnected');
   const [wifiConnecting, setWifiConnecting] = useState(false);
@@ -270,9 +270,9 @@ export function BleOscilloscopeDashboard() {
   const [speechFileName, setSpeechFileName] = useState('');
   const [recordingDurationMs, setRecordingDurationMs] = useState(0);
 
-  const bluetoothRef = useRef<Bluetooth | null>(null);
-  const deviceRef = useRef<BluetoothDevice | null>(null);
-  const characteristicRef = useRef<BluetoothRemoteGATTCharacteristic | null>(null);
+  const bluetoothRef = useRef<any>(null);
+  const deviceRef = useRef<any>(null);
+  const characteristicRef = useRef<any>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const packetStoreRef = useRef<PacketStore | null>(null);
   const sequenceRef = useRef<number | null>(null);
@@ -345,7 +345,7 @@ export function BleOscilloscopeDashboard() {
       }
       try {
         const knownDevices = await bluetoothRef.current.getDevices();
-        setDevices(knownDevices.map((device) => ({ id: device.id, name: device.name || 'Unnamed device', connected: device.gatt.connected })));
+        setDevices(knownDevices.map((device: any) => ({ id: device.id, name: device.name || 'Unnamed device', connected: device.gatt?.connected })));
       } catch {
         setErrorMessage('Unable to enumerate known devices right now.');
       }
@@ -374,7 +374,7 @@ export function BleOscilloscopeDashboard() {
     }
   };
 
-  const connectToDevice = async (device: BluetoothDevice) => {
+  const connectToDevice = async (device: any) => {
     if (!bluetoothRef.current) {
       throw new Error('Web Bluetooth is not available.');
     }
@@ -393,7 +393,7 @@ export function BleOscilloscopeDashboard() {
       await characteristic.startNotifications();
 
       const handleValue = (event: Event) => {
-        const value = (event.target as BluetoothRemoteGATTCharacteristic).value;
+        const value = (event.target as any).value;
         if (!value) {
           return;
         }
@@ -495,7 +495,7 @@ export function BleOscilloscopeDashboard() {
   };
 
   const testWifiConnection = async () => {
-    const ip = wifiIp.trim();
+    const ip = wifiIp.trim() || '192.168.1.8';
     const port = wifiPort.trim() || '8000';
     if (!ip || !/^([a-zA-Z0-9.-]+|\d{1,3}(\.\d{1,3}){3})$/.test(ip)) {
       setWifiConnected(false);
@@ -516,19 +516,20 @@ export function BleOscilloscopeDashboard() {
         body: JSON.stringify({ host: ip, port: Number(port), device_id: 'ESP32-LASER-01' }),
       });
 
+      const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error('Backend unavailable');
+        throw new Error(payload?.detail || 'Backend unavailable');
       }
 
       persistWifiConfig(ip, port);
-      setWifiConnected(true);
-      setWifiStatus('Connected');
-      setStatus('Connected to backend over Wi-Fi');
-      return true;
-    } catch {
+      setWifiConnected(Boolean(payload?.paired ?? true));
+      setWifiStatus(payload?.paired ? 'Connected' : 'Pending pairing');
+      setStatus(payload?.paired ? 'Connected to backend over Wi-Fi' : 'Backend reached but pairing is pending');
+      return Boolean(payload?.paired ?? true);
+    } catch (error) {
       setWifiConnected(false);
       setWifiStatus('Backend unavailable');
-      setErrorMessage('Unable to reach the backend. Check the laptop IP, port, and whether the FastAPI server is running.');
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to reach the backend. Check the laptop IP, port, and whether the FastAPI server is running.');
       setStatus('Backend unavailable');
       return false;
     } finally {

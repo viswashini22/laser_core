@@ -1,151 +1,101 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { LayoutShell } from '@/components/layout-shell';
-import { Activity, Waves } from 'lucide-react';
+import { Activity, Pause, Play, RefreshCw, Sliders, Waves } from 'lucide-react';
+import { ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip } from 'recharts';
 
-interface SignalPayload {
-  device_id: string | null;
-  samples: number[];
-  sample_rate: number;
-  received_at: string | null;
-}
-
-export default function SignalPage() {
-  const [signalPayload, setSignalPayload] = useState<SignalPayload>({
-    device_id: null,
-    samples: [],
-    sample_rate: 16000,
-    received_at: null,
-  });
-  const [status, setStatus] = useState('Waiting for ESP32 Wi-Fi stream');
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+export default function LiveSignalPage() {
+  const [samples, setSamples] = useState<number[]>([]);
+  const [isLive, setIsLive] = useState(true);
+  const [isPaused, setIsPaused] = useState(false);
+  const [sampleRate, setSampleRate] = useState(16000);
+  const [timeWindowMs, setTimeWindowMs] = useState(16);
 
   useEffect(() => {
-    let isMounted = true;
-    const readBackendUrl = () => {
-      if (typeof window === 'undefined') {
-        return 'http://127.0.0.1:8000';
-      }
-      const storedIp = window.localStorage.getItem('laservoice.wifi.ip') || '127.0.0.1';
-      const storedPort = window.localStorage.getItem('laservoice.wifi.port') || '8000';
-      return `http://${storedIp}:${storedPort}`;
-    };
+    let timer: any;
 
-    const loadSignal = async () => {
+    const fetchSignal = async () => {
+      if (!isLive || isPaused) return;
       try {
-        const baseUrl = readBackendUrl();
-        const response = await fetch(`${baseUrl}/api/signal/latest`);
-        if (!response.ok) {
-          throw new Error('Backend unavailable');
+        const res = await fetch('http://localhost:8000/api/signal/latest');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.samples && json.samples.length > 0) {
+            setSamples(json.samples);
+            setSampleRate(json.sample_rate || 16000);
+          }
         }
-        const payload = await response.json();
-        if (!isMounted) {
-          return;
-        }
-        setSignalPayload(payload);
-        setStatus(payload.samples?.length ? 'Live ESP32 signal data received' : 'Waiting for ESP32 Wi-Fi stream');
-        setErrorMessage(null);
       } catch {
-        if (isMounted) {
-          setStatus('Backend unavailable');
-          setErrorMessage('Connect the backend and enter the laptop IP in the device page to view live Wi-Fi signal data.');
-        }
+        // quiet fail
       }
     };
 
-    void loadSignal();
-    const interval = window.setInterval(() => {
-      void loadSignal();
-    }, 2000);
+    fetchSignal();
+    timer = setInterval(fetchSignal, 300);
+    return () => clearInterval(timer);
+  }, [isLive, isPaused]);
 
-    return () => {
-      isMounted = false;
-      window.clearInterval(interval);
-    };
-  }, []);
-
-  const channels = useMemo(() => {
-    const values = signalPayload.samples.slice(-12);
-    if (values.length === 0) {
-      return [
-        { label: 'Channel A', value: '92%', tone: 'text-cyan-300' },
-        { label: 'Channel B', value: '87%', tone: 'text-violet-300' },
-        { label: 'Channel C', value: '90%', tone: 'text-emerald-300' },
-      ];
-    }
-
-    const maxValue = Math.max(...values.map((value) => Math.abs(value)), 1);
-    return [
-      {
-        label: 'Signal RMS',
-        value: `${Math.round((Math.max(...values) / maxValue) * 100)}%`,
-        tone: 'text-cyan-300',
-      },
-      {
-        label: 'Amplitude',
-        value: `${Math.round((Math.abs(values[values.length - 1]) / maxValue) * 100)}%`,
-        tone: 'text-violet-300',
-      },
-      {
-        label: 'Samples',
-        value: `${values.length}`,
-        tone: 'text-emerald-300',
-      },
-    ];
-  }, [signalPayload.samples]);
-
-  const waveformBars = useMemo(() => {
-    const values = signalPayload.samples.slice(-12);
-    if (values.length === 0) {
-      return [38, 54, 46, 73, 68, 82, 62, 90, 76, 84, 58, 96];
-    }
-    const maxValue = Math.max(...values.map((value) => Math.abs(value)), 1);
-    return values.map((value) => Math.max(12, Math.round((Math.abs(value) / maxValue) * 100)));
-  }, [signalPayload.samples]);
+  const chartData = samples.map((v, i) => ({
+    timeMs: Number(((i / sampleRate) * 1000).toFixed(2)),
+    amplitude: Number(v.toFixed(4)),
+  }));
 
   return (
     <LayoutShell>
       <div className="space-y-6">
-        <div className="glass rounded-[2rem] p-6 sm:p-8">
-          <p className="text-sm uppercase tracking-[0.3em] text-cyan-300">Signal Visualizer</p>
-          <h1 className="mt-2 text-3xl font-semibold text-white">Inspect acoustic signal integrity</h1>
-          <p className="mt-3 max-w-2xl text-slate-400">Render spectral quality in real time and monitor channel stability for reconstruction workflows.</p>
-          <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-sm text-slate-300">
-            <p className="font-medium text-white">Status: {status}</p>
-            {signalPayload.device_id ? <p className="mt-2 text-cyan-200">Device: {signalPayload.device_id}</p> : null}
-            {errorMessage ? <p className="mt-2 text-amber-300">{errorMessage}</p> : null}
+        <div className="scada-panel p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-semibold text-cyan-400 uppercase tracking-widest">
+              <Waves className="h-4 w-4" /> Instrument View
+            </div>
+            <h1 className="text-2xl font-bold text-white mt-1">Live Oscillation Waveform</h1>
+            <p className="text-xs text-slate-400 mt-1">
+              High-resolution time-domain waveform of incoming photodiode sensor samples from ESP32
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsLive(!isLive)}
+              className={`px-4 py-2 rounded-xl border text-xs font-bold flex items-center gap-2 transition ${
+                isLive ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300' : 'border-slate-700 bg-slate-800 text-slate-400'
+              }`}
+            >
+              <Play className="h-3.5 w-3.5" /> {isLive ? 'Live Stream Active' : 'Stopped'}
+            </button>
+            <button
+              onClick={() => setIsPaused(!isPaused)}
+              className={`px-4 py-2 rounded-xl border text-xs font-bold transition ${
+                isPaused ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' : 'border-slate-700 bg-slate-800 text-slate-300'
+              }`}
+            >
+              <Pause className="h-3.5 w-3.5" /> {isPaused ? 'Resume' : 'Pause'}
+            </button>
           </div>
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-          <div className="glass rounded-3xl p-6">
-            <div className="flex items-center gap-2 text-cyan-200">
-              <Waves className="h-5 w-5" />
-              <span className="text-sm">Live waveform envelope</span>
-            </div>
-            <div className="mt-6 flex h-72 items-end gap-3 rounded-3xl border border-white/10 bg-slate-950/50 p-6">
-              {waveformBars.map((height, index) => (
-                <div key={index} className="flex-1 rounded-t-full bg-gradient-to-t from-cyan-500 to-violet-400" style={{ height: `${height}%` }} />
-              ))}
+        <div className="scada-panel p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-white">Oscilloscope Screen (Time Domain)</h2>
+            <div className="text-xs text-slate-400 font-mono">
+              Sample Count: {samples.length} | Sampling Rate: {sampleRate} Hz
             </div>
           </div>
 
-          <div className="space-y-4">
-            {channels.map((channel) => (
-              <div key={channel.label} className="glass rounded-3xl p-5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Activity className="h-4 w-4 text-cyan-200" />
-                    <span className="text-sm text-slate-400">{channel.label}</span>
-                  </div>
-                  <span className={`text-lg font-semibold ${channel.tone}`}>{channel.value}</span>
-                </div>
-                <div className="mt-4 h-2 rounded-full bg-slate-800">
-                  <div className="h-2 rounded-full bg-gradient-to-r from-cyan-400 to-violet-400" style={{ width: channel.value }} />
-                </div>
-              </div>
-            ))}
+          <div className="h-96 w-full pt-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <CartesianGrid stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
+                <XAxis dataKey="timeMs" stroke="#64748b" tickFormatter={(t) => `${t}ms`} />
+                <YAxis domain={[-1.2, 1.2]} stroke="#64748b" />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
+                  formatter={(val: any) => [`${val} g`, 'Amplitude']}
+                />
+                <Line type="monotone" dataKey="amplitude" stroke="#38bdf8" strokeWidth={2} dot={false} isAnimationActive={false} />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
         </div>
       </div>

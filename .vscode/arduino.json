@@ -1,0 +1,7 @@
+{
+  "sketch": "esp32\\laser_vibration_sensor\\laser_vibration_sensor.ino",
+  "board": "esp32:esp32:esp32",
+  "configuration": "FlashFreq=80,UploadSpeed=115200,DebugLevel=none",
+  "port": "COM5",
+  "output": "./build"
+}

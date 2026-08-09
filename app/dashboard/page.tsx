@@ -1,293 +1,385 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { Activity, AudioLines, Brain, Database, Mic2, Play, Radio, Sparkles, Waves } from 'lucide-react';
-import { ChartCard } from '@/components/chart-card';
-import { StatCard } from '@/components/stat-card';
+import { useEffect, useRef, useState } from 'react';
 import { LayoutShell } from '@/components/layout-shell';
+import {
+  Activity,
+  AlertTriangle,
+  BarChart3,
+  CheckCircle2,
+  Cpu,
+  Pause,
+  Play,
+  Radio,
+  RefreshCw,
+  Sliders,
+  Sparkles,
+  Wifi,
+  WifiOff,
+  Zap,
+} from 'lucide-react';
+import { ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip } from 'recharts';
 
-interface DashboardSummary {
-  devices: Array<{ id: number; name: string; status: string; signal: number; latency: number }>;
-  datasets: Array<{ id: number; name: string; status: string; size_gb: number }>;
-  models: Array<{ id: number; name: string; accuracy: number; status: string }>;
-  signal_uptime: string;
-  active_sessions: number;
-}
-
-interface SignalPayload {
-  device_id: string | null;
+interface TelemetryData {
+  device_id: string;
   samples: number[];
   sample_rate: number;
   received_at: string | null;
-}
-
-function formatBytes(value: number) {
-  return `${value.toFixed(1)} GB`;
-}
-
-function calculateMetrics(samples: number[]) {
-  if (!samples.length) {
-    return { peak: 0, rms: 0, snr: 0, crest: 0, dynamicRange: 0 };
-  }
-
-  const magnitude = samples.map((sample) => Math.abs(sample));
-  const peak = Math.max(...magnitude);
-  const rms = Math.sqrt(magnitude.reduce((total, value) => total + value * value, 0) / magnitude.length);
-  const noiseFloor = Math.max(0.01, Math.min(...magnitude) || 0.01);
-  const snr = Math.max(0, 20 * Math.log10((rms || 0.0001) / (noiseFloor || 0.0001)));
-  const crest = peak / (rms || 0.0001);
-  const dynamicRange = Math.max(0, 20 * Math.log10((peak || 0.0001) / (noiseFloor || 0.0001)));
-
-  return { peak, rms, snr, crest, dynamicRange };
+  is_stale: boolean;
+  stale_seconds?: number;
+  packets_per_sec: number;
+  latency_ms: number;
+  mode: 'REAL' | 'DEMO';
+  analysis: {
+    rms: number;
+    peak: number;
+    peak_to_peak: number;
+    crest_factor: number;
+    variance: number;
+    std_dev: number;
+    dominant_freq: number;
+    fundamental_freq: number;
+    peak_freq_magnitude: number;
+    spectral_energy: number;
+    spectral_centroid: number;
+    signal_quality: number;
+  };
+  prediction: {
+    condition: 'NORMAL' | 'WARNING' | 'CRITICAL';
+    anomaly_score: number;
+    baseline_deviation: 'Low' | 'Medium' | 'High';
+    message: string;
+    confidence: number;
+    dominant_freq?: number;
+    rms?: number;
+  };
 }
 
 export default function DashboardPage() {
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [signalPayload, setSignalPayload] = useState<SignalPayload>({ device_id: null, samples: [], sample_rate: 16000, received_at: null });
-  const [status, setStatus] = useState('Checking live telemetry');
-  const [recordingActive, setRecordingActive] = useState(false);
+  const [data, setData] = useState<TelemetryData | null>(null);
+  const [isMonitoring, setIsMonitoring] = useState(true);
+  const [isPaused, setIsPaused] = useState(false);
+  const [waveformHistory, setWaveformHistory] = useState<Array<{ index: number; value: number }>>([]);
+  const [backendOnline, setBackendOnline] = useState(true);
+
+  const fetchTelemetry = async () => {
+    if (isPaused || !isMonitoring) return;
+    try {
+      const res = await fetch('http://localhost:8000/api/signal/latest');
+      if (res.ok) {
+        const json: TelemetryData = await res.json();
+        setData(json);
+        setBackendOnline(true);
+
+        if (json.samples && json.samples.length > 0) {
+          const formatted = json.samples.map((val, idx) => ({
+            index: idx,
+            value: Number(val.toFixed(4)),
+          }));
+          setWaveformHistory(formatted);
+        }
+      } else {
+        setBackendOnline(false);
+      }
+    } catch {
+      setBackendOnline(false);
+    }
+  };
 
   useEffect(() => {
-    const readBackendUrl = () => {
-      if (typeof window === 'undefined') {
-        return 'http://127.0.0.1:8000';
-      }
-      const storedIp = window.localStorage.getItem('laservoice.wifi.ip') || '127.0.0.1';
-      const storedPort = window.localStorage.getItem('laservoice.wifi.port') || '8000';
-      return `http://${storedIp}:${storedPort}`;
-    };
+    fetchTelemetry();
+    const interval = setInterval(fetchTelemetry, 400); // 2.5 FPS stream refresh
+    return () => clearInterval(interval);
+  }, [isMonitoring, isPaused]);
 
-    const loadData = async () => {
-      try {
-        const baseUrl = readBackendUrl();
-        const [dashboardResponse, signalResponse] = await Promise.all([fetch(`${baseUrl}/api/dashboard`), fetch(`${baseUrl}/api/signal/latest`)]);
-        if (!dashboardResponse.ok || !signalResponse.ok) {
-          throw new Error('Backend unavailable');
-        }
-        const dashboardPayload = await dashboardResponse.json();
-        const signalPayloadData = await signalResponse.json();
-        setSummary(dashboardPayload);
-        setSignalPayload(signalPayloadData);
-        setStatus(signalPayloadData.samples?.length ? 'Operational • Live signal streaming' : 'Operational • Waiting for first packet');
-      } catch {
-        setStatus('Operational • Backend unavailable');
-      }
-    };
+  const clearWaveform = () => {
+    setWaveformHistory([]);
+  };
 
-    void loadData();
-    const interval = window.setInterval(() => {
-      void loadData();
-    }, 3000);
+  // Extract variables with defaults
+  const condition = data?.prediction?.condition || 'NORMAL';
+  const anomalyScore = data?.prediction?.anomaly_score ?? 0.08;
+  const baselineDeviation = data?.prediction?.baseline_deviation || 'Low';
+  const message = data?.prediction?.message || 'Vibration pattern is within the learned baseline.';
+  const isStale = data?.is_stale ?? false;
+  const espConnected = data?.device_id && !isStale;
+  const mode = data?.mode || 'REAL';
 
-    return () => window.clearInterval(interval);
-  }, []);
+  const rms = data?.analysis?.rms ?? 0.0;
+  const peak = data?.analysis?.peak ?? 0.0;
+  const dominantFreq = data?.analysis?.dominant_freq ?? 0.0;
+  const sampleRate = data?.sample_rate ?? 16000;
+  const signalQuality = data?.analysis?.signal_quality ?? 95.0;
+  const pps = data?.packets_per_sec ?? (espConnected ? 10 : 0);
+  const latency = data?.latency_ms ?? 12;
 
-  const metrics = useMemo(() => {
-    const derived = calculateMetrics(signalPayload.samples);
-    return [
-      { title: 'System Status', value: 'Operational', hint: 'All systems running normal', icon: <Activity className="h-5 w-5" />, accent: 'text-emerald-300' },
-      {
-        title: 'ESP32 Connection',
-        value: signalPayload.device_id ? 'Connected' : 'Disconnected',
-        hint: signalPayload.device_id ? `Device ${signalPayload.device_id}` : 'Awaiting stream',
-        icon: <Radio className="h-5 w-5" />,
-        accent: signalPayload.device_id ? 'text-cyan-300' : 'text-amber-300',
-      },
-      { title: 'Sample Rate', value: `${signalPayload.sample_rate || 16000} Hz`, hint: 'Real backend sample rate', icon: <Waves className="h-5 w-5" />, accent: 'text-violet-300' },
-      { title: 'Signal Quality', value: `${Math.max(0, Math.min(100, Math.round((derived.rms || 0) * 100)))}%`, hint: 'Calculated from current samples', icon: <Sparkles className="h-5 w-5" />, accent: 'text-cyan-300' },
-      { title: 'Uptime', value: summary?.signal_uptime || '99.98%', hint: 'Available uptime from backend', icon: <Brain className="h-5 w-5" />, accent: 'text-emerald-300' },
-    ];
-  }, [signalPayload, summary]);
-
-  const chartData = useMemo(() => {
-    const values = signalPayload.samples.slice(-8);
-    if (!values.length) {
-      return Array.from({ length: 8 }, (_, index) => ({ name: `T${index + 1}`, value: 24 + index * 3 }));
-    }
-    const maxValue = Math.max(...values.map((value) => Math.abs(value)), 1);
-    return values.map((value, index) => ({ name: `S${index + 1}`, value: Math.round((Math.abs(value) / maxValue) * 100) }));
-  }, [signalPayload.samples]);
-
-  const analysis = useMemo(() => {
-    const derived = calculateMetrics(signalPayload.samples);
-    return [
-      { label: 'Peak Amplitude', value: derived.peak.toFixed(3) },
-      { label: 'RMS Level', value: derived.rms.toFixed(3) },
-      { label: 'SNR', value: `${derived.snr.toFixed(1)} dB` },
-      { label: 'Crest Factor', value: derived.crest.toFixed(2) },
-      { label: 'Dynamic Range', value: `${derived.dynamicRange.toFixed(1)} dB` },
-    ];
-  }, [signalPayload.samples]);
-
-  const activeDevice = summary?.devices?.[0];
-  const dataset = summary?.datasets?.[0];
-  const model = summary?.models?.[0];
+  // Condition Badge Color Helper
+  const getConditionColor = (cond: string) => {
+    if (cond === 'NORMAL') return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]';
+    if (cond === 'WARNING') return 'border-amber-500/40 bg-amber-500/10 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]';
+    return 'border-rose-500/40 bg-rose-500/10 text-rose-400 shadow-[0_0_18px_rgba(239,68,68,0.3)]';
+  };
 
   return (
     <LayoutShell>
       <div className="space-y-6">
-        <section className="rounded-[28px] border border-cyan-400/15 bg-slate-950/70 p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.04)] backdrop-blur-xl sm:p-8">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        {/* Header Bar */}
+        <div className="scada-panel p-6">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div>
-              <p className="text-sm uppercase tracking-[0.35em] text-cyan-300">Acoustic Intelligence Command Center</p>
-              <h1 className="mt-2 text-3xl font-semibold text-white sm:text-4xl">LaserVoice AI operating dashboard</h1>
-              <p className="mt-3 max-w-2xl text-sm text-slate-400 sm:text-base">Track live ESP32 signal flow, pulse the AI pipeline, and supervise reconstruction health from one premium workspace.</p>
+              <div className="flex items-center gap-2 text-xs font-semibold text-cyan-400 uppercase tracking-widest">
+                <Sparkles className="h-4 w-4" /> Non-Contact Optical Telemetry
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mt-1">
+                Machine Vibration Monitor
+              </h1>
+              <p className="text-xs text-slate-400 mt-1">
+                Real-time laser photodiode vibration sensing & ML anomaly detection pipeline
+              </p>
             </div>
+
+            {/* Top Status Indicators */}
             <div className="flex flex-wrap items-center gap-3">
-              <div className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200">{status}</div>
-              <button
-                type="button"
-                onClick={() => setRecordingActive((prev) => !prev)}
-                className="inline-flex items-center gap-2 rounded-full border border-cyan-400/25 bg-cyan-500/10 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:bg-cyan-500/20"
-              >
-                <Play className="h-4 w-4" />
-                {recordingActive ? 'Recording Live' : 'Start Recording'}
-              </button>
+              {/* System Mode Badge */}
+              <div className={`px-3 py-1.5 rounded-xl border text-xs font-bold ${mode === 'REAL' ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300' : 'border-purple-500/40 bg-purple-500/10 text-purple-300'}`}>
+                {mode === 'REAL' ? '● REAL ESP32 DATA' : '● DEMO SYNTHETIC DATA'}
+              </div>
+
+              {/* Machine Condition Status */}
+              <div className={`px-4 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-2 ${getConditionColor(condition)}`}>
+                <span className={`h-2.5 w-2.5 rounded-full ${condition === 'NORMAL' ? 'bg-emerald-400 animate-pulse' : condition === 'WARNING' ? 'bg-amber-400 animate-ping' : 'bg-rose-400 animate-ping'}`} />
+                SYSTEM STATUS: {condition}
+              </div>
+
+              {/* ESP32 Status */}
+              <div className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-2 ${espConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800 text-slate-400'}`}>
+                {espConnected ? <Wifi className="h-3.5 w-3.5 text-emerald-400" /> : <WifiOff className="h-3.5 w-3.5 text-slate-400" />}
+                ESP32: {espConnected ? 'Connected' : 'Disconnected'}
+              </div>
+
+              {/* Backend Status */}
+              <div className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-2 ${backendOnline ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-400'}`}>
+                <span className={`h-2 w-2 rounded-full ${backendOnline ? 'bg-cyan-400' : 'bg-rose-500'}`} />
+                Backend: {backendOnline ? 'Online' : 'Offline'}
+              </div>
             </div>
           </div>
-        </section>
+        </div>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          {metrics.map((metric) => (
-            <StatCard key={metric.title} title={metric.title} value={metric.value} hint={metric.hint} icon={metric.icon} accent={metric.accent} />
-          ))}
-        </section>
+        {/* Live Stale Warning Banner if applicable */}
+        {isStale && mode === 'REAL' && (
+          <div className="scada-panel-warning p-4 flex items-center gap-3">
+            <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0" />
+            <div className="text-xs text-amber-200">
+              <span className="font-bold uppercase tracking-wider">STALE TELEMETRY DATA: </span>
+              No packet received from ESP32 for over {data?.stale_seconds || 3.0} seconds. Check ESP32 Wi-Fi connection or power.
+            </div>
+          </div>
+        )}
 
-        <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-          <div className="rounded-[28px] border border-cyan-400/15 bg-slate-950/70 p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] backdrop-blur-xl">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* 8 Metric Cards Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {/* Card 1: Machine Status */}
+          <div className="scada-panel p-4 flex flex-col justify-between">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">1. Machine Status</p>
+            <div className="mt-2">
+              <p className={`text-xl sm:text-2xl font-bold ${condition === 'NORMAL' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {condition === 'NORMAL' ? 'NORMAL' : 'ABNORMAL'}
+              </p>
+              <p className="text-[10px] text-slate-400 mt-1">Anomaly Score: {anomalyScore.toFixed(2)}</p>
+            </div>
+          </div>
+
+          {/* Card 2: Vibration RMS */}
+          <div className="scada-panel p-4 flex flex-col justify-between">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">2. Vibration RMS</p>
+            <div className="mt-2">
+              <p className="text-xl sm:text-2xl font-bold text-cyan-300 text-glow-cyan">
+                {rms.toFixed(4)} <span className="text-xs font-normal text-slate-400">g</span>
+              </p>
+              <p className="text-[10px] text-slate-400 mt-1">Energy Baseline</p>
+            </div>
+          </div>
+
+          {/* Card 3: Peak Amplitude */}
+          <div className="scada-panel p-4 flex flex-col justify-between">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">3. Peak Amplitude</p>
+            <div className="mt-2">
+              <p className="text-xl sm:text-2xl font-bold text-purple-300">
+                {peak.toFixed(4)} <span className="text-xs font-normal text-slate-400">g_pk</span>
+              </p>
+              <p className="text-[10px] text-slate-400 mt-1">Max Abs Displacement</p>
+            </div>
+          </div>
+
+          {/* Card 4: Dominant Frequency */}
+          <div className="scada-panel p-4 flex flex-col justify-between">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">4. Dominant Frequency</p>
+            <div className="mt-2">
+              <p className="text-xl sm:text-2xl font-bold text-cyan-400">
+                {dominantFreq.toFixed(1)} <span className="text-xs font-normal text-slate-400">Hz</span>
+              </p>
+              <p className="text-[10px] text-slate-400 mt-1">FFT Peak Bin</p>
+            </div>
+          </div>
+
+          {/* Card 5: Sampling Rate */}
+          <div className="scada-panel p-4 flex flex-col justify-between">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">5. Sampling Rate</p>
+            <div className="mt-2">
+              <p className="text-xl sm:text-2xl font-bold text-slate-200">
+                {sampleRate.toLocaleString()} <span className="text-xs font-normal text-slate-400">Hz</span>
+              </p>
+              <p className="text-[10px] text-slate-400 mt-1">Optical ADC Target</p>
+            </div>
+          </div>
+
+          {/* Card 6: Signal Quality */}
+          <div className="scada-panel p-4 flex flex-col justify-between">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">6. Signal Quality</p>
+            <div className="mt-2">
+              <p className="text-xl sm:text-2xl font-bold text-emerald-400">
+                {signalQuality.toFixed(1)}<span className="text-xs font-normal text-slate-400">%</span>
+              </p>
+              <p className="text-[10px] text-slate-400 mt-1">SNR Dynamic Range</p>
+            </div>
+          </div>
+
+          {/* Card 7: Packets/sec */}
+          <div className="scada-panel p-4 flex flex-col justify-between">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">7. Packets/sec</p>
+            <div className="mt-2">
+              <p className="text-xl sm:text-2xl font-bold text-slate-200">
+                {pps} <span className="text-xs font-normal text-slate-400">p/s</span>
+              </p>
+              <p className="text-[10px] text-slate-400 mt-1">Wi-Fi Ingestion Rate</p>
+            </div>
+          </div>
+
+          {/* Card 8: Latency */}
+          <div className="scada-panel p-4 flex flex-col justify-between">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">8. Backend Latency</p>
+            <div className="mt-2">
+              <p className="text-xl sm:text-2xl font-bold text-cyan-300">
+                {latency} <span className="text-xs font-normal text-slate-400">ms</span>
+              </p>
+              <p className="text-[10px] text-slate-400 mt-1">Processing Delay</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Oscilloscope Waveform & Condition Result Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Live Oscilloscope Panel (Span 2 cols) */}
+          <div className="scada-panel p-6 lg:col-span-2 space-y-4">
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-slate-400">Live Waveform</p>
-                <p className="text-xl font-semibold text-white">Real-time signal from ESP32</p>
+                <p className="text-xs font-semibold text-cyan-400 uppercase tracking-wider">Live Oscillation</p>
+                <h2 className="text-lg font-bold text-white">Time-Domain Signal Waveform</h2>
               </div>
-              <div className="flex items-center gap-2 text-sm text-slate-300">
-                <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-                <span>Live</span>
-                <span className="ml-3 rounded-full border border-cyan-400/20 bg-cyan-500/10 px-2.5 py-1 text-cyan-100">{signalPayload.samples.length} samples</span>
+
+              {/* Waveform Controls */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsMonitoring(!isMonitoring)}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition ${isMonitoring ? 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700' : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'}`}
+                >
+                  {isMonitoring ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                  {isMonitoring ? 'Stop' : 'Start'}
+                </button>
+                <button
+                  onClick={() => setIsPaused(!isPaused)}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${isPaused ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' : 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+                >
+                  {isPaused ? 'Resume' : 'Pause'}
+                </button>
+                <button
+                  onClick={clearWaveform}
+                  className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-xs font-semibold text-slate-300 hover:bg-slate-700 transition"
+                >
+                  Clear
+                </button>
               </div>
             </div>
-            <div className="mt-5 flex h-72 items-end gap-2 rounded-[24px] border border-cyan-400/10 bg-slate-900/90 p-4">
-              {chartData.map((point, index) => (
-                <div key={`${point.name}-${index}`} className="flex-1 rounded-t-full bg-gradient-to-t from-cyan-500 via-cyan-400 to-violet-500" style={{ height: `${Math.max(12, point.value)}%` }} />
-              ))}
+
+            {/* Waveform Chart */}
+            <div className="h-72 w-full pt-2">
+              {waveformHistory.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={waveformHistory}>
+                    <CartesianGrid stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
+                    <XAxis dataKey="index" hide />
+                    <YAxis domain={[-1.2, 1.2]} stroke="#64748b" tickFormatter={(v) => v.toFixed(1)} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
+                      formatter={(val: any) => [`${val} g`, 'Normalized Amp']}
+                    />
+                    <Line type="monotone" dataKey="value" stroke="#38bdf8" strokeWidth={1.8} dot={false} isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-xs text-slate-500">
+                  No waveform samples available
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-800/60">
+              <span>X Axis: Time (Samples)</span>
+              <span>Y Axis: Normalized Amplitude (-1.0 to +1.0)</span>
+              <span className="text-cyan-400 font-semibold">Live ESP32 Stream: {isMonitoring && !isPaused ? 'Active' : 'Paused'}</span>
             </div>
           </div>
 
-          <div className="rounded-[28px] border border-cyan-400/15 bg-slate-950/70 p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] backdrop-blur-xl">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-cyan-300" />
-              <div>
-                <p className="text-sm text-slate-400">Signal Analysis</p>
-                <p className="text-xl font-semibold text-white">Live acoustic metrics</p>
+          {/* Machine Condition Anomaly Result Card (1 col) */}
+          <div className={`p-6 flex flex-col justify-between ${condition === 'NORMAL' ? 'scada-panel-healthy' : condition === 'WARNING' ? 'scada-panel-warning' : 'scada-panel-critical'}`}>
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Condition Assessment</span>
+                <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold tracking-wider ${condition === 'NORMAL' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : condition === 'WARNING' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'}`}>
+                  {condition}
+                </span>
+              </div>
+
+              {/* Large Visual Condition State */}
+              <div className="mt-6 text-center">
+                <div className="inline-flex items-center justify-center p-4 rounded-full bg-slate-950/60 border border-white/10 mb-3">
+                  {condition === 'NORMAL' ? (
+                    <CheckCircle2 className="h-10 w-10 text-emerald-400" />
+                  ) : (
+                    <AlertTriangle className="h-10 w-10 text-amber-400 animate-bounce" />
+                  )}
+                </div>
+                <h3 className="text-2xl font-bold text-white tracking-tight">{condition}</h3>
+                <p className="text-xs text-slate-300 mt-2 px-2 leading-relaxed">"{message}"</p>
+              </div>
+
+              {/* Metrics details */}
+              <div className="mt-6 space-y-3 pt-4 border-t border-white/10 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Anomaly Score:</span>
+                  <span className="font-mono font-bold text-white">{anomalyScore.toFixed(4)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Baseline Deviation:</span>
+                  <span className="font-semibold text-cyan-300">{baselineDeviation}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Dominant Frequency:</span>
+                  <span className="font-mono font-bold text-white">{dominantFreq.toFixed(1)} Hz</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Calculated RMS:</span>
+                  <span className="font-mono font-bold text-white">{rms.toFixed(4)}</span>
+                </div>
               </div>
             </div>
-            <div className="mt-5 space-y-3">
-              {analysis.map((item) => (
-                <div key={item.label} className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/70 px-4 py-3 text-sm">
-                  <span className="text-slate-400">{item.label}</span>
-                  <span className="font-mono text-cyan-100">{item.value}</span>
-                </div>
-              ))}
+
+            <div className="mt-6 text-[10px] text-center text-slate-400 italic">
+              ML Model: Anomaly Detection pipeline against baseline profile.
             </div>
           </div>
-        </section>
-
-        <section className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-          <ChartCard title="Signal trend overview" subtitle="Signal quality progression" data={chartData.map((point) => ({ name: point.name, value: point.value }))} />
-          <div className="rounded-[28px] border border-cyan-400/15 bg-slate-950/70 p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] backdrop-blur-xl">
-            <div className="flex items-center gap-2">
-              <AudioLines className="h-5 w-5 text-cyan-300" />
-              <div>
-                <p className="text-sm text-slate-400">Connection Details</p>
-                <p className="text-xl font-semibold text-white">ESP32 telemetry snapshot</p>
-              </div>
-            </div>
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
-                <p className="text-sm text-slate-400">Device ID</p>
-                <p className="mt-1 font-mono text-cyan-100">{signalPayload.device_id || 'Awaiting'}</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
-                <p className="text-sm text-slate-400">Sample Rate</p>
-                <p className="mt-1 font-mono text-cyan-100">{signalPayload.sample_rate || 16000} Hz</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
-                <p className="text-sm text-slate-400">Uptime</p>
-                <p className="mt-1 font-mono text-cyan-100">{summary?.signal_uptime || '99.98%'}</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
-                <p className="text-sm text-slate-400">Last Packet</p>
-                <p className="mt-1 font-mono text-cyan-100">{signalPayload.received_at ? new Date(signalPayload.received_at).toLocaleTimeString() : 'Pending'}</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="grid gap-6 lg:grid-cols-[1fr_0.75fr]">
-          <div className="rounded-[28px] border border-cyan-400/15 bg-slate-950/70 p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] backdrop-blur-xl">
-            <div className="flex items-center gap-2">
-              <Mic2 className="h-5 w-5 text-cyan-300" />
-              <div>
-                <p className="text-sm text-slate-400">Data Stream</p>
-                <p className="text-xl font-semibold text-white">Pipeline throughput</p>
-              </div>
-            </div>
-            <div className="mt-5 grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
-                <p className="text-sm text-slate-400">Packets</p>
-                <p className="mt-1 font-mono text-cyan-100">{signalPayload.samples.length}</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
-                <p className="text-sm text-slate-400">Latency</p>
-                <p className="mt-1 font-mono text-cyan-100">{activeDevice ? `${activeDevice.latency.toFixed(1)} ms` : '—'}</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
-                <p className="text-sm text-slate-400">Dataset</p>
-                <p className="mt-1 font-mono text-cyan-100">{dataset ? formatBytes(dataset.size_gb) : '—'}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-[28px] border border-cyan-400/15 bg-slate-950/70 p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] backdrop-blur-xl">
-            <div className="flex items-center gap-2">
-              <Database className="h-5 w-5 text-cyan-300" />
-              <div>
-                <p className="text-sm text-slate-400">Pipeline Status</p>
-                <p className="text-xl font-semibold text-white">Model and dataset health</p>
-              </div>
-            </div>
-            <div className="mt-5 space-y-3 text-sm">
-              <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Active model</span>
-                  <span className="font-mono text-cyan-100">{model?.name || '—'}</span>
-                </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-slate-400">Accuracy</span>
-                  <span className="font-mono text-emerald-300">{model ? `${model.accuracy.toFixed(1)}%` : '—'}</span>
-                </div>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Primary dataset</span>
-                  <span className="font-mono text-cyan-100">{dataset?.name || '—'}</span>
-                </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-slate-400">State</span>
-                  <span className="font-mono text-emerald-300">{dataset?.status || '—'}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <footer className="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-cyan-400/15 bg-slate-950/70 px-4 py-3 text-sm text-slate-400 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] backdrop-blur-xl">
-          <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> System Status</span>
-          <span className="font-mono text-cyan-100">Backend API • {summary ? 'Online' : 'Checking'}</span>
-          <span className="font-mono text-cyan-100">Database • Ready</span>
-          <span className="font-mono text-cyan-100">AI Pipeline • Live</span>
-          <span className="font-mono text-cyan-100">Storage • {dataset ? formatBytes(dataset.size_gb) : '—'}</span>
-        </footer>
+        </div>
       </div>
     </LayoutShell>
   );
