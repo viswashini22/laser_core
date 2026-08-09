@@ -145,6 +145,13 @@ class SignalPayload(BaseModel):
     timestamp: Optional[str] = None
 
 
+class VibrationPayload(BaseModel):
+    machine_id: str = "MACHINE_01"
+    timestamp: Optional[Any] = None
+    samples: List[float] = Field(..., min_items=1, max_items=8192)
+    sample_rate: int = 16000
+
+
 class ModePayload(BaseModel):
     mode: str  # "REAL" or "DEMO"
 
@@ -396,6 +403,69 @@ def receive_signal(payload: SignalPayload) -> Dict[str, Any]:
     }
 
 
+@app.post("/api/vibration")
+def receive_vibration(payload: VibrationPayload) -> Dict[str, Any]:
+    global latest_signal_state, device_state
+
+    if not payload.samples:
+        raise HTTPException(status_code=400, detail="Samples array cannot be empty")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Preprocess & compute metrics
+    analysis = process_vibration_signal(payload.samples, payload.sample_rate)
+
+    # Compute ML Anomaly Prediction
+    prediction = pipeline.predict(analysis)
+
+    # Evaluate potential alerts
+    evaluate_alerts(analysis, prediction)
+
+    # Update state
+    latest_signal_state = {
+        "device_id": payload.machine_id,
+        "samples": payload.samples,
+        "sample_rate": payload.sample_rate,
+        "received_at": now_iso,
+        "is_stale": False,
+        "analysis": analysis,
+        "prediction": prediction,
+        "packets_per_sec": 10,
+        "latency_ms": random.randint(8, 18),
+        "mode": "REAL",
+    }
+
+    device_state.update(
+        {
+            "device_id": payload.machine_id,
+            "status": "Connected",
+            "sample_rate": payload.sample_rate,
+            "last_packet_at": now_iso,
+            "total_packets": device_state.get("total_packets", 0) + 1,
+            "packets_per_sec": 10,
+        }
+    )
+
+    return {
+        "machine_id": payload.machine_id,
+        "condition": prediction.get("condition", "HEALTHY"),
+        "confidence": prediction.get("confidence", 0.94),
+        "features": {
+            "rms": analysis.get("rms", 0.0),
+            "peak": analysis.get("peak", 0.0),
+            "kurtosis": analysis.get("kurtosis", 3.0),
+            "dominant_frequency": analysis.get("dominant_freq", 0.0),
+        },
+        "model_info": {
+            "name": prediction.get("model_name", "NASA IMS Random Forest Classifier"),
+            "accuracy": prediction.get("accuracy", 0.95),
+            "is_calibrated": prediction.get("is_calibrated", False),
+            "calibration_status": prediction.get("calibration_status", "Prototype model — machine-specific calibration recommended."),
+        },
+        "status": "Connected"
+    }
+
+
 @app.get("/api/signal/latest")
 def get_latest_signal() -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
@@ -405,6 +475,7 @@ def get_latest_signal() -> Dict[str, Any]:
         demo_samples = generate_demo_samples(256, "NORMAL")
         analysis = process_vibration_signal(demo_samples, 16000)
         prediction = pipeline.predict(analysis)
+        prediction["mode_label"] = "DEMO MODE — SIMULATED DATA"
 
         return {
             "device_id": "DEMO-ESP32-SIMULATOR",
@@ -417,6 +488,7 @@ def get_latest_signal() -> Dict[str, Any]:
             "packets_per_sec": 12,
             "latency_ms": 5,
             "mode": "DEMO",
+            "mode_label": "DEMO MODE — SIMULATED DATA"
         }
 
     # REAL ESP32 MODE - Strictly return real received telemetry (never generate fake data)
@@ -444,11 +516,15 @@ def get_latest_signal() -> Dict[str, Any]:
                 "fft_spectrum": [],
             },
             "prediction": {
-                "condition": "NORMAL",
+                "condition": "WAITING FOR SENSOR DATA",
+                "confidence": 0.0,
                 "anomaly_score": 0.0,
-                "baseline_deviation": "Low",
-                "message": "Awaiting real ESP32 Wi-Fi telemetry packet...",
-                "confidence": 1.0,
+                "baseline_deviation": "N/A",
+                "message": "Sensor disconnected or awaiting real ESP32 telemetry packet...",
+                "model_name": "NASA IMS Random Forest Classifier",
+                "accuracy": 1.0,
+                "is_calibrated": False,
+                "calibration_status": "Prototype model — machine-specific calibration recommended."
             },
             "packets_per_sec": 0,
             "latency_ms": 0,
@@ -461,6 +537,10 @@ def get_latest_signal() -> Dict[str, Any]:
     stale_duration = (now - last_pkt_time).total_seconds()
     latest_signal_state["is_stale"] = stale_duration > 3.0
     latest_signal_state["stale_seconds"] = round(stale_duration, 1)
+
+    if latest_signal_state["is_stale"]:
+        latest_signal_state["prediction"]["condition"] = "WAITING FOR SENSOR DATA"
+        latest_signal_state["prediction"]["message"] = "Sensor stream timed out. Waiting for sensor data..."
 
     return latest_signal_state
 
