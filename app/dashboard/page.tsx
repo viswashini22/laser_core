@@ -74,7 +74,7 @@ export default function DashboardPage() {
         if (json.samples && json.samples.length > 0) {
           const formatted = json.samples.map((val, idx) => ({
             index: idx,
-            value: Number(val.toFixed(4)),
+            value: Number(val),
           }));
           setWaveformHistory(formatted);
         }
@@ -309,10 +309,10 @@ export default function DashboardPage() {
                   <LineChart data={waveformHistory}>
                     <CartesianGrid stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
                     <XAxis dataKey="index" hide />
-                    <YAxis domain={[-1.2, 1.2]} stroke="#64748b" tickFormatter={(v) => v.toFixed(1)} />
+                    <YAxis domain={['auto', 'auto']} stroke="#64748b" tickFormatter={(v) => String(Math.round(v))} />
                     <Tooltip
                       contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
-                      formatter={(val: any) => [`${val} g`, 'Normalized Amp']}
+                      formatter={(val: any) => [`${val}`, 'Raw ADC Reading']}
                     />
                     <Line type="monotone" dataKey="value" stroke="#38bdf8" strokeWidth={1.8} dot={false} isAnimationActive={false} />
                   </LineChart>

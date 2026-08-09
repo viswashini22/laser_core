@@ -12,3 +12,5 @@ __pycache__/
 LaserDataset/
 *.db
 *.sqlite
+first_10_files/
+next_batch_files/

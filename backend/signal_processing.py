@@ -96,7 +96,7 @@ def process_vibration_signal(raw_samples: List[float], sample_rate: int = 16000)
     ]
 
     return {
-        "dc_offset": dc_offset,
+        "dc_offset": round(dc_offset, 2),
         "rms": round(rms, 4),
         "peak": round(peak, 4),
         "peak_to_peak": round(peak_to_peak, 4),

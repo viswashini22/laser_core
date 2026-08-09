@@ -1,41 +1,45 @@
 /*
   =============================================================================
-  LaserVibe - Non-Contact Machine Vibration Sensor (ESP32 Firmware)
+  LaserVibe ESP32 + ADS1115 16-Bit I2C ADC Firmware
   =============================================================================
-  Hardware Setup:
-  - ESP32 WROOM-32 / ESP32-S3
-  - Photodiode / Optical receiver connected to Analog Pin (GPIO 34)
-  - Laser diode aimed at machine target surface
-
-  Architecture:
-  ESP32 (ADC Samples Batch) --[Wi-Fi HTTP POST]--> FastAPI (http://<LAPTOP_IP>:8000/api/signal) --> Next.js Dashboard
+  Hardware Wiring:
+    - ADS1115 VCC  --> ESP32 3.3V (or 5V)
+    - ADS1115 GND  --> ESP32 GND
+    - ADS1115 SDA  --> ESP32 GPIO 21
+    - ADS1115 SCL  --> ESP32 GPIO 22
+    - Photodiode   --> ADS1115 Pin A0
   =============================================================================
 */
 
+#include <Wire.h>
+#include <Adafruit_ADS1X15.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
 
-// ==========================================
-// User Wi-Fi Credentials
-// ==========================================
+// =============================================================================
+// Network & Device Configuration
+// =============================================================================
 #define WIFI_SSID "SECE-IGNITE"
 #define WIFI_PASSWORD "Sece&2k26"
 
-// Default Laptop LAN IP (Set your laptop IP, or ESP32 will auto-discover)
 String backendIP = "10.57.1.251";
 #define BACKEND_PORT 8000
 #define DEVICE_ID "ESP32-LASER-01"
 
-#define ADC_PIN 34               // Photodiode signal pin
-#define SAMPLE_RATE 16000        // Sampling frequency in Hz
-#define BATCH_SIZE 128           // Samples per HTTP POST packet
-#define SAMPLE_INTERVAL_US (1000000 / SAMPLE_RATE)
+// I2C Pins for ADS1115
+#define I2C_SDA 21
+#define I2C_SCL 22
 
-#define TEST_MODE false          // Set to true to generate test sine wave when optical sensor is disconnected
+#define SAMPLE_RATE 860  // ADS1115 maximum high-speed data rate (860 SPS)
+#define BATCH_SIZE 64    // Samples per packet
 
-int samplesBuffer[BATCH_SIZE];
+Adafruit_ADS1115 ads;
+bool adsFound = false;
 
-void connectToWifi() {
+int rawBuffer[BATCH_SIZE];
+unsigned long packetSequence = 0;
+
+void connectWifi() {
   if (WiFi.status() == WL_CONNECTED) return;
 
   Serial.print("[Wi-Fi] Connecting to: ");
@@ -45,7 +49,7 @@ void connectToWifi() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   int retries = 0;
-  while (WiFi.status() != WL_CONNECTED && retries < 30) {
+  while (WiFi.status() != WL_CONNECTED && retries < 20) {
     delay(500);
     Serial.print(".");
     retries++;
@@ -53,107 +57,8 @@ void connectToWifi() {
 
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\n[Wi-Fi] Connected successfully!");
-    Serial.print("[Wi-Fi] ESP32 Local IP: ");
+    Serial.print("[Wi-Fi] ESP32 IP: ");
     Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("\n[Wi-Fi] Connection failed. Will retry...");
-  }
-}
-
-// Automatically probe local subnet to locate FastAPI backend on port 8000
-bool autoDiscoverBackend() {
-  if (WiFi.status() != WL_CONNECTED) return false;
-
-  IPAddress localIP = WiFi.localIP();
-  String subnet = String(localIP[0]) + "." + String(localIP[1]) + "." + String(localIP[2]) + ".";
-
-  Serial.println("[Auto-Discovery] Scanning local subnet for FastAPI backend...");
-
-  // Probe current backendIP first
-  String testUrl = "http://" + backendIP + ":" + String(BACKEND_PORT) + "/api/health";
-  HTTPClient http;
-  http.setTimeout(800);
-  http.begin(testUrl);
-  int code = http.GET();
-  http.end();
-
-  if (code == 200) {
-    Serial.print("[Auto-Discovery] Found backend at: ");
-    Serial.println(backendIP);
-    return true;
-  }
-
-  // Scan common IP range in subnet (1 to 254)
-  for (int i = 1; i < 255; i++) {
-    if (i == localIP[3]) continue; // Skip ESP32's own IP
-    String candidateIP = subnet + String(i);
-    String url = "http://" + candidateIP + ":" + String(BACKEND_PORT) + "/api/health";
-
-    http.setTimeout(150);
-    http.begin(url);
-    int resCode = http.GET();
-    http.end();
-
-    if (resCode == 200) {
-      backendIP = candidateIP;
-      Serial.print("[Auto-Discovery] Discovered FastAPI Backend at IP: ");
-      Serial.println(backendIP);
-      return true;
-    }
-  }
-
-  Serial.println("[Auto-Discovery] Could not auto-discover backend. Check laptop IP or firewall.");
-  return false;
-}
-
-void collectSamples() {
-  unsigned long nextSampleTime = micros();
-
-  for (int i = 0; i < BATCH_SIZE; i++) {
-    while (micros() < nextSampleTime) {
-      // Precise sample timer loop
-    }
-    nextSampleTime += SAMPLE_INTERVAL_US;
-
-#if TEST_MODE
-    float t = (float)micros() / 1000000.0;
-    samplesBuffer[i] = 512 + (int)(150.0 * sin(2.0 * PI * 50.0 * t)) + random(-10, 10);
-#else
-    samplesBuffer[i] = analogRead(ADC_PIN);
-#endif
-  }
-}
-
-bool sendBatchToBackend() {
-  if (WiFi.status() != WL_CONNECTED) {
-    connectToWifi();
-    if (WiFi.status() != WL_CONNECTED) return false;
-  }
-
-  String serverUrl = "http://" + backendIP + ":" + String(BACKEND_PORT) + "/api/signal";
-
-  HTTPClient http;
-  http.begin(serverUrl);
-  http.addHeader("Content-Type", "application/json");
-
-  String jsonPayload = "{\"device_id\":\"" + String(DEVICE_ID) + "\",\"sample_rate\":" + String(SAMPLE_RATE) + ",\"samples\":[";
-  for (int i = 0; i < BATCH_SIZE; i++) {
-    jsonPayload += String(samplesBuffer[i]);
-    if (i < BATCH_SIZE - 1) jsonPayload += ",";
-  }
-  jsonPayload += "]}";
-
-  http.setTimeout(1500);
-  int httpResponseCode = http.POST(jsonPayload);
-  http.end();
-
-  if (httpResponseCode >= 200 && httpResponseCode < 300) {
-    Serial.printf("[HTTP] Batch sent -> Status: %d\n", httpResponseCode);
-    return true;
-  } else {
-    Serial.printf("[HTTP] POST failed (Code: %d). Retrying auto-discovery...\n", httpResponseCode);
-    autoDiscoverBackend();
-    return false;
   }
 }
 
@@ -161,19 +66,95 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  Serial.println("=================================================");
-  Serial.println(" LaserVibe Optical Vibration Sensor Firmware ");
-  Serial.println("=================================================");
+  Serial.println("\n=============================================");
+  Serial.println("  LaserVibe ESP32 + ADS1115 I2C ADC Initializing");
+  Serial.println("=============================================");
 
-  pinMode(ADC_PIN, INPUT);
-  analogReadResolution(12);
+  // Initialize I2C Bus on GPIO 21 (SDA) and GPIO 22 (SCL)
+  Wire.begin(I2C_SDA, I2C_SCL);
 
-  connectToWifi();
-  autoDiscoverBackend();
+  // Initialize ADS1115 at I2C address 0x48
+  if (ads.begin(0x48)) {
+    adsFound = true;
+    Serial.println("[ADS1115] Sensor found on I2C (0x48)!");
+    
+    // GAIN_TWOTHIRDS: +/- 6.144V range (1 bit = 0.1875mV)
+    ads.setGain(GAIN_TWOTHIRDS);
+    
+    // Set to maximum high-speed sample rate (860 samples per second)
+    ads.setDataRate(RATE_ADS1115_860SPS);
+  } else {
+    Serial.println("[ERROR] ADS1115 NOT FOUND! Check I2C Wiring (GPIO 21 SDA, GPIO 22 SCL)");
+  }
+
+  connectWifi();
+}
+
+void sendPacket(const int* samples, int count) {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  HTTPClient http;
+  String url = "http://" + backendIP + ":" + String(BACKEND_PORT) + "/api/signal";
+
+  http.setTimeout(1500);
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+
+  String json = "{\"device_id\":\"" + String(DEVICE_ID) + "\",";
+  json += "\"sequence\":" + String(packetSequence++) + ",";
+  json += "\"sample_rate\":" + String(SAMPLE_RATE) + ",";
+  json += "\"samples\":[";
+
+  for (int i = 0; i < count; i++) {
+    json += String(samples[i]);
+    if (i < count - 1) json += ",";
+  }
+  json += "]}";
+
+  int httpCode = http.POST(json);
+  if (httpCode > 0) {
+    Serial.printf("[HTTP] Packet #%lu sent -> %d OK\n", packetSequence, httpCode);
+  } else {
+    Serial.printf("[HTTP] Error: %s\n", http.errorToString(httpCode).c_str());
+  }
+  http.end();
 }
 
 void loop() {
-  collectSamples();
-  sendBatchToBackend();
-  delay(10);
+  connectWifi();
+
+  if (!adsFound) {
+    Serial.println("[ADS1115] Retrying I2C connection...");
+    if (ads.begin(0x48)) {
+      adsFound = true;
+      ads.setGain(GAIN_TWOTHIRDS);
+      ads.setDataRate(RATE_ADS1115_860SPS);
+    }
+    delay(1000);
+    return;
+  }
+
+  // Read high-resolution 16-bit samples from Channel A0
+  for (int i = 0; i < BATCH_SIZE; i++) {
+    int16_t adc0 = ads.readADC_SingleEnded(0);
+    rawBuffer[i] = adc0;
+  }
+
+  // Diagnostics print every 10 packets
+  if (packetSequence % 10 == 0) {
+    long sum = 0;
+    int minVal = 32767, maxVal = -32768;
+    for (int i = 0; i < BATCH_SIZE; i++) {
+      sum += rawBuffer[i];
+      if (rawBuffer[i] < minVal) minVal = rawBuffer[i];
+      if (rawBuffer[i] > maxVal) maxVal = rawBuffer[i];
+    }
+    int avg = sum / BATCH_SIZE;
+    // Convert 16-bit raw reading to Millivolts (0.1875 mV per LSB at GAIN_TWOTHIRDS)
+    float avgVoltage = avg * 0.1875 / 1000.0;
+    Serial.printf("[ADS1115 A0 16-Bit] Avg Raw: %d (%.3fV) | Min: %d | Max: %d | Pk-Pk: %d\n", avg, avgVoltage, minVal, maxVal, maxVal - minVal);
+  }
+
+  sendPacket(rawBuffer, BATCH_SIZE);
+  delay(20);
 }

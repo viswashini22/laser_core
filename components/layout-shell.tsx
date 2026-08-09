@@ -161,7 +161,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                       return (
                         <Link
                           key={item.href + item.label}
-                          href={item.href}
+                          href={item.href as any}
                           className={`flex items-center gap-3 rounded-xl px-3 py-2 text-xs font-medium transition ${
                             active
                               ? 'border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.15)]'
@@ -241,7 +241,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                       return (
                         <Link
                           key={item.href + item.label}
-                          href={item.href}
+                          href={item.href as any}
                           onClick={() => setMobileNavOpen(false)}
                           className={`flex items-center gap-3 rounded-lg px-3 py-2 text-xs font-medium ${
                             active ? 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/30' : 'text-slate-400'

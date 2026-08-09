@@ -88,10 +88,10 @@ export default function LiveSignalPage() {
               <LineChart data={chartData}>
                 <CartesianGrid stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
                 <XAxis dataKey="timeMs" stroke="#64748b" tickFormatter={(t) => `${t}ms`} />
-                <YAxis domain={[-1.2, 1.2]} stroke="#64748b" />
+                <YAxis domain={['auto', 'auto']} stroke="#64748b" tickFormatter={(v) => String(Math.round(v))} />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
-                  formatter={(val: any) => [`${val} g`, 'Amplitude']}
+                  formatter={(val: any) => [`${val}`, 'Raw ADC Reading']}
                 />
                 <Line type="monotone" dataKey="amplitude" stroke="#38bdf8" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
