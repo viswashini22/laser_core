@@ -39,7 +39,10 @@ export default function FrequencySpectrumPage() {
     return () => clearInterval(timer);
   }, []);
 
-  const timeChartData = samples.map((v, idx) => ({ index: idx, amp: Number(v.toFixed(4)) }));
+  const timeChartData = samples.map((v, idx) => {
+    const val = typeof v === 'number' ? v : (v && typeof v === 'object' && 'value' in v ? Number((v as any).value) : 0);
+    return { index: idx, amp: Number(val.toFixed(4)) };
+  });
 
   return (
     <LayoutShell>

@@ -36,10 +36,13 @@ export default function LiveSignalPage() {
     return () => clearInterval(timer);
   }, [isLive, isPaused]);
 
-  const chartData = samples.map((v, i) => ({
-    timeMs: Number(((i / sampleRate) * 1000).toFixed(2)),
-    amplitude: Number(v.toFixed(4)),
-  }));
+  const chartData = samples.map((v, i) => {
+    const val = typeof v === 'number' ? v : (v && typeof v === 'object' && 'value' in v ? Number((v as any).value) : 0);
+    return {
+      timeMs: Number(((i / sampleRate) * 1000).toFixed(2)),
+      amplitude: Number(val.toFixed(4)),
+    };
+  });
 
   return (
     <LayoutShell>

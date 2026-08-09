@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'LaserVoice AI',
-  description: 'A futuristic AI voice platform with signal intelligence, training, and speech reconstruction.',
+  title: 'LaserVoice AI — Machine Vibration Monitor',
+  description: 'Futuristic Machine Vibration Monitoring & NASA IMS ML Diagnostics Platform.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

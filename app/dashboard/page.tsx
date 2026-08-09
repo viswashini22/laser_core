@@ -127,7 +127,7 @@ export default function DashboardPage() {
   // Condition Badge Color Helper
   const getConditionColor = (cond: string) => {
     if (cond === 'HEALTHY' || cond === 'NORMAL') return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]';
-    if (cond === 'DEVIATION') return 'border-amber-500/40 bg-amber-500/10 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]';
+    if (cond === 'WARNING' || cond === 'DEVIATION') return 'border-amber-500/40 bg-amber-500/10 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]';
     if (cond === 'WAITING FOR SENSOR DATA' || cond === 'SENSOR DISCONNECTED') return 'border-slate-700 bg-slate-800 text-slate-400';
     return 'border-rose-500/40 bg-rose-500/10 text-rose-400 shadow-[0_0_18px_rgba(239,68,68,0.3)]';
   };
@@ -196,6 +196,22 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* High Frequency Threshold Exceeded Warning Banner */}
+        {(dominantFreq > 200) && (
+          <div className="scada-panel-warning p-4 flex items-center justify-between border-amber-500/40 bg-amber-500/10">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 animate-pulse" />
+              <div className="text-xs text-amber-200">
+                <span className="font-bold uppercase tracking-wider">HIGH FREQUENCY WARNING: </span>
+                Dominant vibration frequency ({dominantFreq.toFixed(1)} Hz) exceeds safe operational threshold (200.0 Hz).
+              </div>
+            </div>
+            <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 font-mono text-xs font-bold border border-amber-500/40">
+              {dominantFreq.toFixed(1)} Hz &gt; 200 Hz
+            </span>
+          </div>
+        )}
+
         {/* Calibration Banner */}
         {!isCalibrated && (
           <div className="p-3 rounded-xl border border-cyan-500/30 bg-cyan-500/5 text-cyan-300 text-xs flex items-center justify-between">
@@ -213,7 +229,7 @@ export default function DashboardPage() {
           <div className="scada-panel p-4 flex flex-col justify-between">
             <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">1. Machine Condition</p>
             <div className="mt-2">
-              <p className={`text-xl sm:text-2xl font-bold ${condition === 'HEALTHY' || condition === 'NORMAL' ? 'text-emerald-400' : condition === 'DEVIATION' ? 'text-amber-400' : espConnected ? 'text-rose-400' : 'text-slate-400'}`}>
+              <p className={`text-xl sm:text-2xl font-bold ${condition === 'HEALTHY' || condition === 'NORMAL' ? 'text-emerald-400' : condition === 'WARNING' || condition === 'DEVIATION' ? 'text-amber-400' : espConnected ? 'text-rose-400' : 'text-slate-400'}`}>
                 {condition}
               </p>
               <p className="text-[10px] text-slate-400 mt-1">Confidence: {(confidence * 100).toFixed(1)}%</p>
@@ -243,13 +259,13 @@ export default function DashboardPage() {
           </div>
 
           {/* Card 4: Dominant Frequency */}
-          <div className="scada-panel p-4 flex flex-col justify-between">
+          <div className={`scada-panel p-4 flex flex-col justify-between transition-colors ${dominantFreq > 200 ? 'border-amber-500/50 bg-amber-500/10 shadow-[0_0_15px_rgba(245,158,11,0.2)]' : ''}`}>
             <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">4. Dominant Frequency</p>
             <div className="mt-2">
-              <p className="text-xl sm:text-2xl font-bold text-cyan-400">
+              <p className={`text-xl sm:text-2xl font-bold ${dominantFreq > 200 ? 'text-amber-400 text-glow-amber' : 'text-cyan-400'}`}>
                 {dominantFreq.toFixed(1)} <span className="text-xs font-normal text-slate-400">Hz</span>
               </p>
-              <p className="text-[10px] text-slate-400 mt-1">FFT Peak Bin</p>
+              <p className="text-[10px] text-slate-400 mt-1">{dominantFreq > 200 ? '● EXCEEDS 200 Hz THRESHOLD' : 'FFT Peak Bin'}</p>
             </div>
           </div>
 
@@ -364,11 +380,11 @@ export default function DashboardPage() {
           </div>
 
           {/* Machine Condition ML Result Card (1 col) */}
-          <div className={`p-6 flex flex-col justify-between ${condition === 'HEALTHY' || condition === 'NORMAL' ? 'scada-panel-healthy' : condition === 'DEVIATION' ? 'scada-panel-warning' : espConnected ? 'scada-panel-critical' : 'scada-panel'}`}>
+          <div className={`p-6 flex flex-col justify-between ${condition === 'HEALTHY' || condition === 'NORMAL' ? 'scada-panel-healthy' : condition === 'WARNING' || condition === 'DEVIATION' ? 'scada-panel-warning' : espConnected ? 'scada-panel-critical' : 'scada-panel'}`}>
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold uppercase tracking-widest text-slate-400">ML MACHINE CONDITION</span>
-                <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold tracking-wider ${condition === 'HEALTHY' || condition === 'NORMAL' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : condition === 'DEVIATION' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : espConnected ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-slate-800 text-slate-400 border border-slate-700'}`}>
+                <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold tracking-wider ${condition === 'HEALTHY' || condition === 'NORMAL' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : condition === 'WARNING' || condition === 'DEVIATION' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : espConnected ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-slate-800 text-slate-400 border border-slate-700'}`}>
                   {condition}
                 </span>
               </div>
@@ -378,7 +394,7 @@ export default function DashboardPage() {
                 <div className="inline-flex items-center justify-center p-4 rounded-full bg-slate-950/60 border border-white/10 mb-3">
                   {condition === 'HEALTHY' || condition === 'NORMAL' ? (
                     <CheckCircle2 className="h-10 w-10 text-emerald-400" />
-                  ) : condition === 'DEVIATION' ? (
+                  ) : condition === 'WARNING' || condition === 'DEVIATION' ? (
                     <AlertTriangle className="h-10 w-10 text-amber-400" />
                   ) : espConnected ? (
                     <AlertTriangle className="h-10 w-10 text-rose-400 animate-bounce" />

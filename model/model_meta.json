@@ -7,48 +7,38 @@
   "f1_score": 1.0,
   "confusion_matrix": [
     [
-      60,
-      0,
-      0,
-      0
-    ],
-    [
-      0,
-      60,
+      100,
       0,
       0
     ],
     [
       0,
-      0,
-      60,
+      100,
       0
     ],
     [
       0,
       0,
-      0,
-      60
+      100
     ]
   ],
   "classes": [
-    "ANOMALY",
-    "DEVIATION",
-    "HEALTHY",
-    "POSSIBLE FAULT"
+    "CRITICAL",
+    "NORMAL",
+    "WARNING"
   ],
   "feature_importances": {
-    "rms": 0.1097,
-    "mean": 0.0798,
-    "std": 0.1201,
-    "variance": 0.1453,
-    "max": 0.1103,
-    "min": 0.1097,
-    "peak_to_peak": 0.113,
-    "kurtosis": 0.1173,
-    "crest_factor": 0.0033,
+    "rms": 0.1298,
+    "mean": 0.1102,
+    "std": 0.1208,
+    "variance": 0.161,
+    "max": 0.1343,
+    "min": 0.119,
+    "peak_to_peak": 0.0902,
+    "kurtosis": 0.0,
+    "crest_factor": 0.0042,
     "dominant_frequency": 0.0,
-    "spectral_energy": 0.0914
+    "spectral_energy": 0.1307
   },
   "feature_names": [
     "rms",
@@ -63,9 +53,9 @@
     "dominant_frequency",
     "spectral_energy"
   ],
-  "total_samples": 1200,
-  "train_samples": 960,
-  "test_samples": 240,
+  "total_samples": 1500,
+  "train_samples": 1200,
+  "test_samples": 300,
   "is_calibrated": false,
   "calibration_status": "Prototype model \u2014 machine-specific calibration recommended."
 }

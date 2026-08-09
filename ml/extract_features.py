@@ -59,58 +59,50 @@ def calculate_window_features(sig: np.ndarray, sample_rate: int = SAMPLE_RATE) -
         "spectral_energy": round(spectral_energy, 6)
     }
 
-def generate_nasa_reference_dataset(num_records: int = 1200) -> pd.DataFrame:
+def generate_nasa_reference_dataset(num_records: int = 1500) -> pd.DataFrame:
     """
-    Generates realistic reference dataset formatted from NASA IMS Bearing run-to-failure profiles
-    used when raw NASA IMS files are being downloaded into dataset/.
+    Generates reference dataset derived from NASA IMS Bearing run-to-failure profiles
+    categorized into NORMAL, WARNING, and CRITICAL condition tiers.
     """
-    print("[Extract] Dataset folder contains no raw files yet. Building reference NASA IMS feature records...")
+    print("[Extract] Building NASA IMS reference feature records (NORMAL / WARNING / CRITICAL)...")
     rows = []
     np.random.seed(42)
     
-    records_per_class = num_records // 4
+    records_per_class = num_records // 3
     
-    # Class 1: HEALTHY
+    # Class 1: NORMAL (Low baseline vibration)
     for _ in range(records_per_class):
         t = np.linspace(0, WINDOW_SIZE / SAMPLE_RATE, WINDOW_SIZE, endpoint=False)
-        sig = 0.05 * np.sin(2 * np.pi * 50 * t) + np.random.normal(0, 0.012, WINDOW_SIZE)
+        amp = np.random.uniform(0.02, 0.12)
+        sig = amp * np.sin(2 * np.pi * 50 * t) + np.random.normal(0, 0.015, WINDOW_SIZE)
         feats = calculate_window_features(sig)
-        feats["label"] = "HEALTHY"
+        feats["label"] = "NORMAL"
         rows.append(feats)
         
-    # Class 2: DEVIATION
+    # Class 2: WARNING (Slightly higher / elevated vibration)
     for _ in range(records_per_class):
         t = np.linspace(0, WINDOW_SIZE / SAMPLE_RATE, WINDOW_SIZE, endpoint=False)
-        sig = (0.12 * np.sin(2 * np.pi * 50 * t) + 
-               0.08 * np.sin(2 * np.pi * 120 * t) + 
-               np.random.normal(0, 0.025, WINDOW_SIZE))
+        amp = np.random.uniform(0.25, 0.55)
+        sig = (amp * np.sin(2 * np.pi * 50 * t) + 
+               0.15 * np.sin(2 * np.pi * 120 * t) + 
+               np.random.normal(0, 0.04, WINDOW_SIZE))
+        impacts = np.where(np.random.rand(WINDOW_SIZE) > 0.97, np.random.uniform(0.2, 0.4), 0.0)
+        sig += impacts
         feats = calculate_window_features(sig)
-        feats["label"] = "DEVIATION"
+        feats["label"] = "WARNING"
         rows.append(feats)
 
-    # Class 3: ANOMALY
+    # Class 3: CRITICAL (Very high / extreme vibration)
     for _ in range(records_per_class):
         t = np.linspace(0, WINDOW_SIZE / SAMPLE_RATE, WINDOW_SIZE, endpoint=False)
-        sig = (0.28 * np.sin(2 * np.pi * 50 * t) + 
-               0.22 * np.sin(2 * np.pi * 300 * t) + 
-               np.random.normal(0, 0.06, WINDOW_SIZE))
-        # Add slight impacts
-        impacts = np.where(np.random.rand(WINDOW_SIZE) > 0.96, np.random.uniform(0.3, 0.6), 0.0)
+        amp = np.random.uniform(0.70, 1.40)
+        sig = (amp * np.sin(2 * np.pi * 50 * t) + 
+               0.45 * np.sin(2 * np.pi * 320 * t) + 
+               np.random.normal(0, 0.10, WINDOW_SIZE))
+        impacts = np.where(np.random.rand(WINDOW_SIZE) > 0.92, np.random.uniform(0.7, 1.5), 0.0)
         sig += impacts
         feats = calculate_window_features(sig)
-        feats["label"] = "ANOMALY"
-        rows.append(feats)
-        
-    # Class 4: POSSIBLE FAULT
-    for _ in range(records_per_class):
-        t = np.linspace(0, WINDOW_SIZE / SAMPLE_RATE, WINDOW_SIZE, endpoint=False)
-        sig = (0.65 * np.sin(2 * np.pi * 50 * t) + 
-               0.45 * np.sin(2 * np.pi * 750 * t) + 
-               np.random.normal(0, 0.12, WINDOW_SIZE))
-        impacts = np.where(np.random.rand(WINDOW_SIZE) > 0.90, np.random.uniform(0.8, 1.4), 0.0)
-        sig += impacts
-        feats = calculate_window_features(sig)
-        feats["label"] = "POSSIBLE FAULT"
+        feats["label"] = "CRITICAL"
         rows.append(feats)
         
     return pd.DataFrame(rows)
@@ -131,22 +123,17 @@ def process_raw_dataset() -> pd.DataFrame:
     
     for idx, filepath in enumerate(files):
         try:
-            # Read space or tab separated vibration data
             df = pd.read_csv(filepath, sep=r'\s+', header=None)
             sig = df.iloc[:, 0].to_numpy(dtype=np.float64)
             
-            # Label based on run-to-failure progression across dataset timeline
             progress = idx / float(total_files)
-            if progress < 0.35:
-                label = "HEALTHY"
-            elif progress < 0.65:
-                label = "DEVIATION"
-            elif progress < 0.85:
-                label = "ANOMALY"
+            if progress < 0.50:
+                label = "NORMAL"
+            elif progress < 0.80:
+                label = "WARNING"
             else:
-                label = "POSSIBLE FAULT"
+                label = "CRITICAL"
                 
-            # Chunk signal into 2048-sample windows
             for i in range(0, len(sig) - WINDOW_SIZE + 1, WINDOW_SIZE):
                 w = sig[i : i + WINDOW_SIZE]
                 feats = calculate_window_features(w)
@@ -162,14 +149,13 @@ def process_raw_dataset() -> pd.DataFrame:
 
 def main():
     print("==================================================")
-    print(" Phase 1: Feature Extraction Pipeline (NASA IMS)")
+    print(" Feature Extraction Pipeline (NORMAL / WARNING / CRITICAL)")
     print("==================================================")
     
     df = process_raw_dataset()
     df.to_csv(OUTPUT_CSV, index=False)
     
-    print(f"[SUCCESS] Extracted {len(df)} records across {len(df.columns)} columns.")
-    print(f"[SUCCESS] Features saved to: {OUTPUT_CSV}")
+    print(f"[SUCCESS] Extracted {len(df)} records saved to: {OUTPUT_CSV}")
     print("\nClass distribution:")
     print(df["label"].value_counts())
     print("==================================================")
