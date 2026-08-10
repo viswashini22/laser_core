@@ -48,6 +48,9 @@ LaserSense is a low-cost, non-contact laser-based system for remotely monitoring
 https://canva.link/20njlzz4woddyvh
 
 ## Live Demonstration Link
+https://drive.google.com/file/d/1fqOP-JEoKHSkOIsRTuAnz3ePy2Y_xss1/view?usp=drivesdk
+
+## Deployement Link
 https://laser-core-5zxg.vercel.app/dashboard
 
 ## GitHub Repository
